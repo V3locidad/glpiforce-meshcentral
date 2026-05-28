@@ -145,12 +145,15 @@ module.exports.glpiforce = function (parent) {
         var action = req.query && req.query.action;
 
         // -------- ping: smoke test for config + connectivity --------
+        // If config is missing or the API is unreachable, we still report a
+        // 'force-only' mode so the iframe can offer the force-inventory action
+        // (which goes through MeshCentral runcommands and does not need GLPI).
         if (action === 'ping') {
             var cfg = loadConfig();
-            if (!cfg) return sendJson(res, 200, { ok: false, error: 'glpi-config.json missing or invalid' });
+            if (!cfg) return sendJson(res, 200, { ok: false, forceOnly: true, error: 'glpi-config.json missing or invalid — only the Force inventory button is available' });
             return getSession(true).then(function () {
                 sendJson(res, 200, { ok: true, glpiUrl: cfg.glpiUrl, staleAfterDays: cfg.staleAfterDays });
-            }).catch(function (e) { sendJson(res, 200, { ok: false, error: e.message }); });
+            }).catch(function (e) { sendJson(res, 200, { ok: false, forceOnly: true, error: e.message }); });
         }
 
         // -------- computers: list all Computer entries with name + date_mod --------

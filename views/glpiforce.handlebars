@@ -72,7 +72,8 @@
     selectedGroup: null,
     checkedNodes: {},
     glpiMap: {},       // normalized hostname -> { id, name, date_mod, staleDays, stale } or null
-    staleAfterDays: 7  // server-provided default
+    staleAfterDays: 7, // server-provided default
+    forceOnly: false   // true when the GLPI API is unreachable or unconfigured
   };
 
   function $(id) { return document.getElementById(id); }
@@ -176,8 +177,11 @@
     arr.forEach(function (n) {
       var ck = state.checkedNodes[n.id] ? ' checked' : '';
       var g = state.glpiMap[normalizeName(n.name)];
-      var status;
-      if (g === undefined) status = '<span class="glpi-status pending">checking…</span>';
+      var status = '';
+      if (state.forceOnly) {
+        // No GLPI snapshot — keep the rows clean.
+        status = '';
+      } else if (g === undefined) status = '<span class="glpi-status pending">checking…</span>';
       else if (g === null)  status = '<span class="glpi-status missing">not in GLPI</span>';
       else if (g.staleDays == null) status = '<span class="glpi-status missing">no date</span>';
       else {
@@ -326,6 +330,19 @@
         $('staleDays').value = (r.staleAfterDays || 7);
         state.staleAfterDays = r.staleAfterDays || 7;
         loadGlpiComputers();
+      } else if (r && r.forceOnly) {
+        // Degraded mode: no GLPI API access. Force button still works; just
+        // hide the controls that depend on the inventory snapshot.
+        el.textContent = 'Force-only mode (no GLPI API)';
+        el.title = r.error || '';
+        el.style.background = '#fff3cd';
+        el.style.color = '#856404';
+        state.forceOnly = true;
+        $('staleDays').disabled = true;
+        $('staleOnly').disabled = true;
+        $('refreshBtn').disabled = true;
+        renderNodes();
+        log('GLPI API not available — force-only mode. Reason: ' + (r.error || 'unknown'));
       } else {
         el.textContent = 'GLPI: ' + (r && r.error ? r.error : 'unreachable');
         el.style.background = '#f8d7da';
