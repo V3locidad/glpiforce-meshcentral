@@ -1,0 +1,7 @@
+{
+  "glpiUrl": "https://glpi.example.com",
+  "appToken": "PUT_GLPI_APP_TOKEN_HERE",
+  "userToken": "PUT_GLPI_USER_TOKEN_HERE",
+  "rejectUnauthorized": true,
+  "staleAfterDays": 7
+}

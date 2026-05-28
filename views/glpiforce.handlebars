@@ -1,0 +1,350 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>GLPI Force</title>
+<style>
+  body { font-family: Segoe UI, Arial, sans-serif; font-size: 13px; margin: 0; padding: 10px; color: #222; }
+  h2 { margin: 0 0 10px 0; font-size: 16px; }
+  .bar { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; padding: 8px; background: #f4f4f4; border: 1px solid #ddd; border-radius: 4px; margin-bottom: 8px; }
+  .bar input[type=text], .bar select, .bar input[type=number] { padding: 3px 6px; border: 1px solid #bbb; border-radius: 3px; font-size: 13px; }
+  button { padding: 5px 10px; border: 1px solid #888; background: #fff; border-radius: 3px; cursor: pointer; font-size: 13px; }
+  button.primary { background: #2c7be5; color: white; border-color: #2c7be5; }
+  button:disabled { opacity: 0.5; cursor: not-allowed; }
+  .cols { display: flex; gap: 10px; }
+  .col { flex: 1; border: 1px solid #ddd; border-radius: 4px; min-height: 400px; max-height: 520px; overflow: auto; }
+  .col h3 { margin: 0; padding: 8px; background: #eee; border-bottom: 1px solid #ddd; font-size: 13px; }
+  .col .search { padding: 6px 8px; border-bottom: 1px solid #eee; }
+  .col .search input { width: 100%; box-sizing: border-box; padding: 3px 6px; border: 1px solid #bbb; border-radius: 3px; }
+  .row { padding: 4px 8px; border-bottom: 1px solid #f0f0f0; cursor: pointer; display: flex; align-items: center; gap: 6px; }
+  .row:hover { background: #f8f8ff; }
+  .row .dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; }
+  .dot.on { background: #2ecc71; }
+  .dot.off { background: #e74c3c; }
+  .row .glpi-status { font-size: 11px; margin-left: auto; padding: 1px 6px; border-radius: 10px; }
+  .glpi-status.fresh { background: #d4edda; color: #155724; }
+  .glpi-status.stale { background: #f8d7da; color: #721c24; }
+  .glpi-status.missing { background: #e2e3e5; color: #383d41; }
+  .glpi-status.pending { background: #fff3cd; color: #856404; }
+  #logs { margin-top: 10px; background: #111; color: #ddd; font-family: Menlo, Consolas, monospace; font-size: 12px; padding: 8px; border-radius: 4px; height: 180px; overflow: auto; white-space: pre-wrap; display: none; }
+  .pill { display: inline-block; padding: 1px 8px; border-radius: 10px; background: #eee; font-size: 11px; margin-left: 6px; }
+</style>
+</head>
+<body>
+<h2>GLPI Force <span id="cfgState" class="pill">checking…</span></h2>
+
+<div class="bar">
+  Stale threshold:
+  <input id="staleDays" type="number" min="1" max="365" style="width:60px">
+  days
+  <label style="margin-left:8px"><input type="checkbox" id="staleOnly"> Show only stale</label>
+  <button id="refreshBtn">Refresh GLPI</button>
+  <button id="forceBtn" class="primary">Force inventory on selected</button>
+  <span id="progress"></span>
+  <span style="margin-left:auto">
+    <button id="logsBtn">Logs</button>
+  </span>
+</div>
+
+<div class="cols">
+  <div class="col">
+    <h3>Groups</h3>
+    <div class="search"><input id="groupSearch" placeholder="Filter groups…"></div>
+    <div id="groupList"></div>
+  </div>
+  <div class="col">
+    <h3>Computers <span id="countLabel" class="pill"></span></h3>
+    <div class="search"><input id="nodeSearch" placeholder="Filter computers…"></div>
+    <div id="nodeList"></div>
+  </div>
+</div>
+
+<div id="logs"></div>
+
+<script>
+(function () {
+  var W = window;
+  var P = (W.parent && W.parent !== W) ? W.parent : W;
+
+  var state = {
+    groups: [],
+    nodes: [],
+    selectedGroup: null,
+    checkedNodes: {},
+    glpiMap: {},       // normalized hostname -> { id, name, date_mod, staleDays, stale } or null
+    staleAfterDays: 7  // server-provided default
+  };
+
+  function $(id) { return document.getElementById(id); }
+  function log(msg) {
+    var el = $('logs');
+    var t = new Date().toLocaleTimeString();
+    el.textContent += '[' + t + '] ' + msg + '\n';
+    el.scrollTop = el.scrollHeight;
+  }
+  function showLogs(v) { $('logs').style.display = v ? 'block' : 'none'; }
+
+  function getMeshes() { try { return P.meshes || P.window.meshes || {}; } catch (e) { return {}; } }
+  function getNodes() { try { return P.nodes || P.window.nodes || {}; } catch (e) { return {}; } }
+  function isWindows(node) {
+    var winIds = [1, 2, 3, 4, 13];
+    return node && node.agent && winIds.indexOf(node.agent.id) !== -1;
+  }
+
+  function normalizeName(s) {
+    if (!s) return '';
+    return String(s).toLowerCase().split('.')[0].trim();
+  }
+
+  function loadFromMesh() {
+    var meshes = getMeshes();
+    var nodes = getNodes();
+    var gList = [];
+    var nList = [];
+    var meshId;
+    for (meshId in meshes) {
+      var m = meshes[meshId];
+      if (!m) continue;
+      gList.push({ id: meshId, name: m.name || meshId });
+    }
+    var nid;
+    for (nid in nodes) {
+      var n = nodes[nid];
+      if (!n) continue;
+      if (!isWindows(n)) continue;
+      var fullId = n._id || nid;
+      nList.push({
+        id: fullId,
+        name: n.name || fullId,
+        meshid: n.meshid,
+        online: !!(n.conn & 1)
+      });
+    }
+    gList.sort(function (a, b) { return a.name.localeCompare(b.name); });
+    nList.sort(function (a, b) { return a.name.localeCompare(b.name); });
+    state.groups = gList;
+    state.nodes = nList;
+  }
+
+  function escapeHtml(s) {
+    return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) {
+      return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
+    });
+  }
+
+  function renderGroups() {
+    var filter = $('groupSearch').value.toLowerCase();
+    var html = '';
+    html += '<div class="row" data-gid="__all__"><b>All Windows computers</b><span class="pill">' + state.nodes.length + '</span></div>';
+    state.groups.forEach(function (g) {
+      if (filter && g.name.toLowerCase().indexOf(filter) === -1) return;
+      var count = state.nodes.filter(function (n) { return n.meshid === g.id; }).length;
+      if (!count) return;
+      var sel = (state.selectedGroup === g.id) ? ' style="background:#eef6ff"' : '';
+      html += '<div class="row" data-gid="' + g.id + '"' + sel + '>' + escapeHtml(g.name) + '<span class="pill">' + count + '</span></div>';
+    });
+    $('groupList').innerHTML = html;
+    [].slice.call($('groupList').querySelectorAll('.row')).forEach(function (el) {
+      el.onclick = function () {
+        var gid = el.getAttribute('data-gid');
+        state.selectedGroup = (gid === '__all__') ? null : gid;
+        renderGroups();
+        renderNodes();
+      };
+    });
+  }
+
+  function visibleNodes() {
+    var filter = $('nodeSearch').value.toLowerCase();
+    var staleOnly = $('staleOnly').checked;
+    return state.nodes.filter(function (n) {
+      if (state.selectedGroup && n.meshid !== state.selectedGroup) return false;
+      if (filter && n.name.toLowerCase().indexOf(filter) === -1) return false;
+      if (staleOnly) {
+        var g = state.glpiMap[normalizeName(n.name)];
+        if (!g) return true;          // "not in GLPI" counts as stale-ish: keep visible
+        return !!g.stale;
+      }
+      return true;
+    });
+  }
+
+  function renderNodes() {
+    var arr = visibleNodes();
+    $('countLabel').textContent = arr.length;
+    var html = '<div class="row" style="background:#fafafa"><input type="checkbox" id="checkAll"> <b>Select all visible</b></div>';
+    arr.forEach(function (n) {
+      var ck = state.checkedNodes[n.id] ? ' checked' : '';
+      var g = state.glpiMap[normalizeName(n.name)];
+      var status;
+      if (g === undefined) status = '<span class="glpi-status pending">checking…</span>';
+      else if (g === null)  status = '<span class="glpi-status missing">not in GLPI</span>';
+      else if (g.staleDays == null) status = '<span class="glpi-status missing">no date</span>';
+      else {
+        var cls = g.stale ? 'stale' : 'fresh';
+        var label = g.staleDays === 0 ? 'today' : (g.staleDays + 'd ago');
+        status = '<span class="glpi-status ' + cls + '">' + escapeHtml(label) + '</span>';
+      }
+      html += '<div class="row" data-nid="' + n.id + '">'
+            + '<input type="checkbox" data-nid="' + n.id + '"' + ck + '>'
+            + '<span class="dot ' + (n.online ? 'on' : 'off') + '"></span>'
+            + escapeHtml(n.name)
+            + status
+            + '</div>';
+    });
+    $('nodeList').innerHTML = html;
+    [].slice.call($('nodeList').querySelectorAll('input[type=checkbox][data-nid]')).forEach(function (cb) {
+      cb.onclick = function (ev) {
+        ev.stopPropagation();
+        var nid = cb.getAttribute('data-nid');
+        if (cb.checked) state.checkedNodes[nid] = true;
+        else delete state.checkedNodes[nid];
+      };
+    });
+    var ca = $('checkAll');
+    if (ca) ca.onclick = function () {
+      var ck = ca.checked;
+      arr.forEach(function (n) {
+        if (ck) state.checkedNodes[n.id] = true;
+        else delete state.checkedNodes[n.id];
+      });
+      renderNodes();
+    };
+  }
+
+  function api(action, params) {
+    var qs = 'action=' + encodeURIComponent(action);
+    if (params) Object.keys(params).forEach(function (k) {
+      qs += '&' + encodeURIComponent(k) + '=' + encodeURIComponent(params[k]);
+    });
+    return fetch('/pluginadmin.ashx?pin=glpiforce&' + qs, { credentials: 'include' })
+      .then(function (r) { return r.json(); });
+  }
+
+  function loadGlpiComputers() {
+    log('Loading GLPI computer inventory…');
+    return api('computers').then(function (r) {
+      if (r && r.error) { log('GLPI error: ' + r.error); return; }
+      var map = {};
+      (r.computers || []).forEach(function (c) {
+        var k = normalizeName(c.name);
+        if (k) map[k] = c;
+      });
+      state.glpiMap = map;
+      if (typeof r.staleAfterDays === 'number') {
+        state.staleAfterDays = r.staleAfterDays;
+        $('staleDays').value = state.staleAfterDays;
+      }
+      // Mark every visible node as either matched or null so the UI gets out of
+      // its 'checking…' placeholder cleanly.
+      state.nodes.forEach(function (n) {
+        var k = normalizeName(n.name);
+        if (state.glpiMap[k] === undefined) state.glpiMap[k] = null;
+      });
+      var matched = Object.keys(map).length;
+      log('GLPI: ' + matched + ' computer(s) loaded.');
+      renderNodes();
+    }).catch(function (e) { log('computers failed: ' + (e && e.message ? e.message : e)); });
+  }
+
+  // -------- fire-and-forget PowerShell to force the local GLPI Agent --------
+  // Strategy: hit the local HTTP endpoint the agent listens on (62354 by default
+  // when "httpd-trust" allows 127.0.0.1). If that fails — service not running or
+  // HTTP disabled — restart the service, which forces a run-on-startup.
+  function meshserver() {
+    try { return P.meshserver || P.window.meshserver; } catch (e) { return null; }
+  }
+
+  var FORCE_PS = [
+    '$ErrorActionPreference = "Continue"',
+    'try {',
+    '  $resp = Invoke-WebRequest -Uri "http://localhost:62354/now" -UseBasicParsing -TimeoutSec 5',
+    '  Write-Host ("GLPI Agent HTTP /now -> " + $resp.StatusCode)',
+    '} catch {',
+    '  Write-Host ("HTTP /now failed: " + $_.Exception.Message)',
+    '  try { Restart-Service "GLPI Agent" -Force; Write-Host "GLPI Agent service restarted" } catch { Write-Host ("Service restart failed: " + $_.Exception.Message) }',
+    '}'
+  ].join("\n");
+
+  function sendPowerShell(nodeIds, script) {
+    var ms = meshserver();
+    if (!ms || typeof ms.send !== 'function') return false;
+    ms.send({
+      action: 'runcommands',
+      nodeids: nodeIds,
+      type: 2, cmds: script, runAsUser: 0, reply: false
+    });
+    return true;
+  }
+
+  function forceSelected() {
+    var ids = Object.keys(state.checkedNodes);
+    if (!ids.length) { alert('Select at least one computer first.'); return; }
+    var nodesById = {};
+    state.nodes.forEach(function (n) { nodesById[n.id] = n; });
+    var online = ids.filter(function (id) { return nodesById[id] && nodesById[id].online; });
+    var offline = ids.length - online.length;
+    if (!online.length) { alert('No online computer in the selection.'); return; }
+    var msg = 'Force a GLPI inventory push on ' + online.length + ' computer(s)?'
+            + (offline ? '\n(' + offline + ' offline will be skipped)' : '');
+    if (!confirm(msg)) return;
+    var ok = sendPowerShell(online, FORCE_PS);
+    if (!ok) { log('Could not access meshserver — request not sent.'); return; }
+    log('Force-inventory command sent to ' + online.length + ' computer(s). Re-check GLPI in a minute.');
+  }
+
+  function init() {
+    loadFromMesh();
+    renderGroups();
+    renderNodes();
+    $('groupSearch').oninput = renderGroups;
+    $('nodeSearch').oninput = renderNodes;
+    $('staleOnly').onchange = renderNodes;
+    $('refreshBtn').onclick = function () { showLogs(true); loadGlpiComputers(); };
+    $('forceBtn').onclick = function () { showLogs(true); forceSelected(); };
+    $('logsBtn').onclick = function () { showLogs($('logs').style.display === 'none'); };
+    $('staleDays').onchange = function () {
+      var v = parseInt($('staleDays').value, 10);
+      if (!isNaN(v) && v > 0) {
+        state.staleAfterDays = v;
+        // Re-flag stale locally without re-querying GLPI.
+        var thresholdMs = v * 86400000;
+        Object.keys(state.glpiMap).forEach(function (k) {
+          var g = state.glpiMap[k];
+          if (g && g.staleDays != null) g.stale = (g.staleDays * 86400000) >= thresholdMs;
+        });
+        renderNodes();
+      }
+    };
+
+    api('ping').then(function (r) {
+      var el = $('cfgState');
+      if (r && r.ok) {
+        el.textContent = 'GLPI OK';
+        el.style.background = '#d4edda';
+        el.style.color = '#155724';
+        $('staleDays').value = (r.staleAfterDays || 7);
+        state.staleAfterDays = r.staleAfterDays || 7;
+        loadGlpiComputers();
+      } else {
+        el.textContent = 'GLPI: ' + (r && r.error ? r.error : 'unreachable');
+        el.style.background = '#f8d7da';
+        el.style.color = '#721c24';
+      }
+    }).catch(function () {
+      var el = $('cfgState');
+      el.textContent = 'plugin endpoint unreachable';
+      el.style.background = '#f8d7da';
+      el.style.color = '#721c24';
+    });
+  }
+
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', init);
+  } else {
+    init();
+  }
+})();
+</script>
+</body>
+</html>

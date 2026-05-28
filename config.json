@@ -1,0 +1,14 @@
+{
+  "name": "glpiforce",
+  "shortName": "glpiforce",
+  "version": "0.0.1",
+  "author": "V3locidad",
+  "description": "Force GLPI Agent inventory push on selected Windows computers, and surface hosts that have not reported in a while.",
+  "hasAdminPanel": true,
+  "homepage": "https://github.com/V3locidad/glpiforce-meshcentral",
+  "changelogUrl": "https://raw.githubusercontent.com/V3locidad/glpiforce-meshcentral/main/changelog.md",
+  "configUrl": "https://raw.githubusercontent.com/V3locidad/glpiforce-meshcentral/main/config.json",
+  "downloadUrl": "https://github.com/V3locidad/glpiforce-meshcentral/archive/refs/heads/main.zip",
+  "repository": { "type": "git", "url": "https://github.com/V3locidad/glpiforce-meshcentral.git" },
+  "meshCentralCompat": ">=1.1.0"
+}
