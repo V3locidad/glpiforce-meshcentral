@@ -17,8 +17,8 @@ Built for IT admins who tire of asking "why isn't this PC in GLPI?" — pick the
 
 - MeshCentral 1.1.0 or later, plugins enabled (`settings.plugins.enabled = true`)
 - GLPI 10.x reachable from the MeshCentral host
-- GLPI **App-Token** (Setup → General → API → Application Tokens)
-- GLPI **User-Token** (your user → Personal token, generated from the user profile page)
+- GLPI **User-Token** (your user → Personal token, generated from the user profile page — labelled *Jeton d'API* in French)
+- GLPI **App-Token** *(optional)*: only needed if your GLPI API client requires one. If you do not have an API client configured, or if it allows requests with no App-Token, leave this field out of the config file entirely.
 - Target machines: Windows with **GLPI Agent** installed (modern agent, not the legacy FusionInventory)
 
 ## Installation
@@ -37,12 +37,12 @@ Built for IT admins who tire of asking "why isn't this PC in GLPI?" — pick the
    ```json
    {
      "glpiUrl": "https://glpi.your-lan",
-     "appToken": "GLPI_APP_TOKEN",
      "userToken": "GLPI_USER_TOKEN",
      "rejectUnauthorized": true,
      "staleAfterDays": 7
    }
    ```
+   Add `"appToken": "..."` only if your GLPI API client requires it.
    Set `rejectUnauthorized` to `false` if your GLPI uses a self-signed HTTPS cert.
 5. Restart MeshCentral
 6. Reload the UI — a new **GLPI** tab appears on each device page

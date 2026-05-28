@@ -30,8 +30,9 @@ module.exports.glpiforce = function (parent) {
         try {
             var c = JSON.parse(fs.readFileSync(configFile, 'utf8'));
             if (!c.glpiUrl) throw new Error('glpiUrl missing');
-            if (!c.appToken) throw new Error('appToken missing');
             if (!c.userToken) throw new Error('userToken missing');
+            // appToken is optional: GLPI 10 lets you create an API client that
+            // does not require it (or skip API clients entirely on small setups).
             if (typeof c.staleAfterDays !== 'number') c.staleAfterDays = 7;
             return c;
         } catch (e) {
@@ -55,10 +56,8 @@ module.exports.glpiforce = function (parent) {
             var basePath = (u.pathname && u.pathname !== '/' ? u.pathname.replace(/\/$/, '') : '') + '/apirest.php';
             var fullPath = basePath + apiPath;
             var bodyStr = body ? JSON.stringify(body) : null;
-            var hdrs = Object.assign({
-                'App-Token': cfg.appToken,
-                'Accept': 'application/json'
-            }, headers || {});
+            var hdrs = Object.assign({ 'Accept': 'application/json' }, headers || {});
+            if (cfg.appToken) hdrs['App-Token'] = cfg.appToken;
             if (bodyStr) {
                 hdrs['Content-Type'] = 'application/json';
                 hdrs['Content-Length'] = Buffer.byteLength(bodyStr);

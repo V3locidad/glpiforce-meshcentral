@@ -1,7 +1,7 @@
 {
   "name": "glpiforce",
   "shortName": "glpiforce",
-  "version": "0.0.1",
+  "version": "0.0.2",
   "author": "V3locidad",
   "description": "Force GLPI Agent inventory push on selected Windows computers, and surface hosts that have not reported in a while.",
   "hasAdminPanel": true,
